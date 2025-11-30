@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Assignment 5 – Three.js Visualization</title>
+
+  <style>
+    /* Make the page background black and remove scrollbars/margins */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+    }
+
+    /* The renderer will create its own <canvas>, so we don't need a styled one,
+       but this ensures any canvas takes the full window size. */
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+
+<!-- Core Three.js library (older version that supports examples/js globals) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/build/three.min.js"></script>
+
+<!-- OrbitControls (attaches to global THREE.OrbitControls) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/controls/OrbitControls.js"></script>
+
+<!-- AnaglyphEffect -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/effects/AnaglyphEffect.js"></script>
+
+<!-- GLTFLoader -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/loaders/GLTFLoader.js"></script>
+
+<!-- Tweakpane UI library -->
+<script src="https://cdn.jsdelivr.net/npm/tweakpane@3.1.10/dist/tweakpane.min.js"></script>
+
+<!-- VertexNormalsHelper (for visualizing Blender mesh normals) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/examples/js/helpers/VertexNormalsHelper.js"></script>
+
+<script src="https://mrdoob.github.io/stats.js/build/stats.min.js"></script>
+
+
+
+</head>
+
+<body>
+  <!-- We let Three.js create and insert the <canvas> element. -->
+
+  <script>
+    // ***** Global variables for our Three.js scene *****
+    let scene;          // holds all 3D objects, lights, etc.
+    let camera;         // defines from where we look at the scene
+    let renderer;       // draws the scene to the <canvas>
+    let controls;       // mouse-controlled orbiting around the scene
+    let effect;         // anaglyph effect wrapper around the renderer
+    let editedMesh; // will hold the mesh loaded from Blender (Hulk.glb)
+    let pane;      // main Tweakpane instance
+    let sceneui;   // folder for "Scene" controls
+    let stats;  // <-- add this with the other global variables
+
+
+    const q_poly_target = new THREE.Quaternion();
+    const q_blender_target = new THREE.Quaternion();
+
+
+
+
+    // Lights we'll set up in Step 2:
+    let ambientLight;
+    let directionalLight;
+
+    //
+    // SCENE SETTINGS (Helper for Tweakpane)
+    //
+    // Settings + helpers for Tweakpane
+    // Settings + helpers for Tweakpane & scene state
+    window.SCENE = {
+    // ---- from earlier steps ----
+    anaglyph: false,
+
+    // PolyCam mesh + rotation flag
+    poly: null,
+    rotate_poly: false,
+    do_rotate_poly: function () {
+        window.SCENE.rotate_poly = !window.SCENE.rotate_poly;
+    },
+
+    // ---- new for Step 11 (Blender mesh) ----
+    // reference to the Blender mesh
+    blender: null,
+
+    // helper object that draws the normals as little lines
+    blender_helper: null,
+
+    // store original material when using MeshNormalMaterial
+    blender_old_material: null,
+
+    // toggles between original material and MeshNormalMaterial
+    change_material: function () {
+        // only do anything if the Blender mesh has been loaded
+        if (!window.SCENE.blender) return;
+
+        // first click: store old material and switch to MeshNormalMaterial
+        if (!window.SCENE.blender_old_material) {
+        window.SCENE.blender_old_material =
+            window.SCENE.blender.material.clone();      // keep a copy
+        window.SCENE.blender.material =
+            new THREE.MeshNormalMaterial();            // show normals as colors
+        } else {
+        // second click: restore old material and clear the stored copy
+        window.SCENE.blender.material =
+            window.SCENE.blender_old_material.clone();
+        window.SCENE.blender_old_material = null;
+        }
+    },
+
+    // 180° rotation for Blender mesh (same idea as PolyCam)
+    rotate_blender: false,
+    do_rotate_blender: function () {
+        window.SCENE.rotate_blender = !window.SCENE.rotate_blender;
+    }
+    };
+
+
+
+    // This will run once the HTML page has loaded
+    window.onload = function () {
+      // ---------------------------
+      // 1) SCENE
+      // ---------------------------
+      scene = new THREE.Scene();
+      // Optional: give the scene a black background (matches CSS)
+      scene.background = new THREE.Color(0x000000);
+
+      // ---------------------------
+      // 2) CAMERA
+      // ---------------------------
+      // PerspectiveCamera(fov, aspect, near, far)
+    camera = new THREE.PerspectiveCamera(
+        60,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        10000
+    );
+
+    // Slightly above and back, looking at the origin
+    camera.position.set(0, 2, 6);
+    camera.lookAt(0, 0, 0);
+
+
+
+      // ---------------------------
+      // 3) RENDERER
+      // ---------------------------
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      // Add the renderer's canvas element to the DOM
+      document.body.appendChild(renderer.domElement);
+
+      // --- Stats.js widget ---
+    stats = new Stats();
+    document.body.appendChild(stats.domElement);
+
+
+      // ---------------------------
+      // 4) ORBIT CONTROLS
+      // ---------------------------
+      // Allow the user to orbit around the scene with the mouse
+      console.log("THREE revision:", THREE.REVISION);
+      console.log("OrbitControls type:", typeof THREE.OrbitControls);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;    // smooth movement
+      controls.dampingFactor = 0.05;
+
+      // ---------------------------
+      // 5) ANAGLYPH EFFECT
+      // ---------------------------
+      // Wrap the renderer in an AnaglyphEffect (like assignment 3)
+      effect = new THREE.AnaglyphEffect(renderer);
+      effect.setSize(window.innerWidth, window.innerHeight);
+
+      // ---------------------------
+      // 6) LIGHTS (Part 3, Step 2)
+      // ---------------------------
+      // Ambient light: uniformly lights everything a bit
+      ambientLight = new THREE.AmbientLight(0xffffff, 0.3); // color, intensity
+      scene.add(ambientLight);
+
+      // Directional light: like a distant sun shining in one direction
+      directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
+      directionalLight.position.set(5, 10, 7); // x, y, z position
+      scene.add(directionalLight);
+
+      // ---------------------------
+    // 9) TWEAKPANE UI (Part 3, Step 8)
+    // ---------------------------
+
+    // Create a new Tweakpane panel (appears in top-right corner)
+    pane = new Tweakpane.Pane();
+
+    // Add a folder called "Scene" – we'll fill it with controls in later steps
+    sceneui = pane.addFolder({ title: 'Scene' });
+
+    // --- add this for Part 10 ---
+    const polyui  = pane.addFolder({ title: 'PolyCam Mesh' });
+
+    const blenderui = pane.addFolder({ title: 'Blender Mesh' });
+
+    sceneui.addInput(window.SCENE, 'anaglyph', {
+        label: 'Anaglyph'
+    });
+
+    sceneui.addInput(directionalLight.position, 'x', {
+        min: -100, max: 100, label: 'Light X'
+    });
+
+    sceneui.addInput(directionalLight.position, 'y', {
+        min: -100, max: 100, label: 'Light Y'
+    });
+
+    sceneui.addInput(directionalLight.position, 'z', {
+        min: -100, max: 100, label: 'Light Z'
+    });
+
+    sceneui.addInput(directionalLight, 'intensity', {
+        min: 0, max: 10, label: 'Intensity'
+    });
+
+    sceneui.addInput(ambientLight, 'color', {
+        label: 'AmbientLight Color'
+    });
+
+    polyui.addButton({ title: 'rotate!' }).on('click', () => {
+        window.SCENE.do_rotate_poly();
+    });
+
+
+
+
+
+
+    // ---------------------------
+    // 9) LOAD THE poly.glb FILE  (Part 3, Step 3)
+    // ---------------------------
+    const loader = new THREE.GLTFLoader();
+
+    // Load poly.glb; MUST be in the SAME folder as index.html
+    loader.load('poly.glb', function (gltf) {
+
+        const poly = gltf.scenes[0].children[0];
+
+        // scale + quaternion (same as before)
+        poly.scale.set(10, 10, 10);
+        poly.quaternion.set(0, 0, 0, 1);
+        poly.translateX(-5);   // keep whatever translation you already liked
+
+        // Part 10: tell the helper which mesh is the PolyCam mesh
+        window.SCENE.poly = poly;
+
+        // Part 10: add wireframe checkbox (binds to material.wireframe)
+        polyui.addInput(poly.material, 'wireframe', {
+            label: 'wireframe'
+        });
+
+        scene.add(gltf.scene);
+    });
+
+
+    // Load the edited mesh exported from Blender (Hulk.glb)
+    // Load the edited mesh exported from Blender (Hulk.glb)
+    loader.load(
+    'Hulk.glb',
+    function (gltf) {
+
+        // Grab the actual mesh from the scene
+        editedMesh = gltf.scene.children[0];
+
+        // Reset rotation to identity (no rotation)
+        editedMesh.quaternion.set(0, 0, 0, 1);
+
+        // Scale ×10 to match PolyCam mesh
+        editedMesh.scale.set(10, 10, 10);
+
+        // Move it a little to the right so the two models sit side-by-side
+        editedMesh.translateX(5);
+
+        // Add to the Three.js scene
+        scene.add(editedMesh);
+
+        // --- STEP 11: hook into SCENE helper ---
+
+        // Remember this mesh globally as the "blender" mesh
+        window.SCENE.blender = editedMesh;
+
+        // Create a VertexNormalsHelper so we can visualize normals
+        // 0.1 = length of the normal lines, 0x0000ff = blue color
+        const helper = new THREE.VertexNormalsHelper(editedMesh, 0.1, 0x0000ff);
+
+        // Start hidden; user can show it via Tweakpane
+        helper.visible = false;
+
+        // Add helper to scene and remember it
+        scene.add(helper);
+        window.SCENE.blender_helper = helper;
+
+        // --- Blender UI controls (Tweakpane) ---
+
+        // Checkbox: show / hide normals helper
+        blenderui.addInput(helper, 'visible', { label: 'Show normals!' });
+
+        // Button: toggle MeshNormalMaterial on the Blender mesh
+        blenderui.addButton({ title: 'Change Material' }).on('click', () => {
+        window.SCENE.change_material();
+        });
+
+        // Button: 180° rotation for Blender mesh
+        blenderui.addButton({ title: 'rotate!' }).on('click', () => {
+        window.SCENE.do_rotate_blender();
+        });
+
+        console.log("Hulk.glb loaded and transformed!", gltf);
+    }
+    );
+
+
+
+
+
+
+
+      // ---------------------------
+      // 7) HANDLE WINDOW RESIZE
+      // ---------------------------
+      window.addEventListener('resize', onWindowResize, false);
+
+      // ---------------------------
+      // 8) START ANIMATION LOOP
+      // ---------------------------
+      animate();
+    };
+
+    // Called whenever the browser window is resized
+    function onWindowResize() {
+      // Update camera aspect ratio and projection
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+
+      // Resize renderer & anaglyph effect
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      effect.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // Main animation loop
+    function animate() {
+        requestAnimationFrame(animate);
+
+        controls.update();
+
+        // --- Part 10: rotate PolyCam mesh when requested ---
+        if (window.SCENE.poly) {
+            if (window.SCENE.rotate_poly) {
+                // 180 degrees around Y axis
+                q_poly_target.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+            } else {
+                // back to original orientation
+                q_poly_target.identity();
+            }
+
+            // smooth interpolation toward target rotation
+            window.SCENE.poly.quaternion.slerp(q_poly_target, 0.01);
+        }
+
+        // --- Step 11: rotate Blender mesh when requested ---
+        if (window.SCENE.blender) {
+            if (window.SCENE.rotate_blender) {
+                // target = 180 degrees around Y axis
+                q_blender_target.setFromAxisAngle(
+                    new THREE.Vector3(0, 1, 0),
+                    Math.PI
+                );
+            } else {
+                // target = original orientation
+                q_blender_target.identity();
+            }
+
+            // smooth interpolation toward target rotation
+            window.SCENE.blender.quaternion.slerp(q_blender_target, 0.01);
+
+            // If we have a normals helper, keep it in sync
+            if (window.SCENE.blender_helper) {
+                window.SCENE.blender_helper.update();
+            }
+        }
+
+
+        // existing render logic (with anaglyph toggle from step 9)
+        if (window.SCENE.anaglyph) {
+            effect.render(scene, camera);
+        } else {
+            renderer.render(scene, camera);
+        }
+
+        stats.update();
+
+    }
+
+  </script>
+</body>
+</html>

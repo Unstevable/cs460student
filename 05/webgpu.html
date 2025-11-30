@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CS460 – WebGPU with Babylon.js</title>
+
+    <!-- Make the page fill the whole window, black background -->
+    <style>
+      html,
+      body {
+        margin: 0;          /* no default margins */
+        padding: 0;         /* no padding */
+        width: 100%;
+        height: 100%;
+        overflow: hidden;   /* hide scrollbars */
+        background: #000;   /* black background */
+      }
+
+      /* The canvas that Babylon/WebGPU will draw into */
+      #renderCanvas {
+        width: 100%;
+        height: 100%;
+        display: block;     /* remove tiny whitespace around canvas */
+      }
+    </style>
+
+    <!-- Babylon core library -->
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <!-- glTF / GLB loader for Babylon -->
+    <script src="https://cdn.babylonjs.com/loaders/babylon.glTF2FileLoader.min.js"></script>
+  </head>
+
+  <body>
+    <!-- Our WebGPU render target -->
+    <canvas id="renderCanvas"></canvas>
+
+    <!-- Your assignment's WebGPU code as a JS module -->
+    <script type="module">
+      // Wrap everything in an async function so we can use "await"
+      async function start() {
+        // Get a reference to the <canvas> in the DOM
+        const canvas = document.getElementById('renderCanvas');
+
+        // Create a Babylon WebGPU engine for this canvas
+        // antialiasing:true = smoother edges
+        let engine = new BABYLON.WebGPUEngine(canvas, { antialiasing: true });
+
+        // Initialize WebGPU; MUST be awaited before creating a scene
+        await engine.initAsync();
+
+        // Create a new Babylon scene using this engine
+        const scene = new BABYLON.Scene(engine);
+
+        // Load the Polycam GLB file (poly.glb must be in the SAME folder as webgpu.html)
+        // ''  -> root URL (current folder)
+        // 'poly.glb' -> your original Polycam mesh
+        await BABYLON.SceneLoader.AppendAsync('', 'poly.glb', scene);
+
+        // Create a default camera and light so we can actually see the model
+        // (true,true,true) = create both camera and light, automatically adjusted
+        scene.createDefaultCameraOrLight(true, true, true);
+
+        // Attach camera controls to the canvas (orbit with mouse similar to Three.js OrbitControls)
+        scene.activeCamera.attachControl(canvas, true);
+
+        // Main render loop – Babylon calls scene.render() every frame
+        engine.runRenderLoop(() => {
+          scene.render();
+        });
+
+        // Make sure the canvas/engine resize when the browser window size changes
+        window.addEventListener('resize', () => {
+          engine.resize();
+        });
+      }
+
+      // Start everything once the module is loaded
+      start();
+    </script>
+  </body>
+</html>
